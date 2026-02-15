@@ -10,10 +10,10 @@ SERVICE_FILE="/etc/systemd/system/ovpn-manager.service"
 
 # --- Helpers ---
 
-info()  { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
-ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
-warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
-error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
+info()  { echo -e "\033[1;34m[INFO]\033[0m  $*" >&2; }
+ok()    { echo -e "\033[1;32m[OK]\033[0m    $*" >&2; }
+warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*" >&2; }
+error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
@@ -33,6 +33,8 @@ EOF
 
 check_linux() {
   [[ "$(uname -s)" == "Linux" ]] || error "This script only supports Linux"
+  command -v apt-get &>/dev/null || error "This script requires apt-get (Debian/Ubuntu). Install dependencies manually on other distros."
+  command -v systemctl &>/dev/null || error "This script requires systemd. Install and manage the service manually on other init systems."
 }
 
 detect_arch() {
@@ -68,7 +70,10 @@ download_binary() {
   tmp=$(mktemp)
 
   info "Downloading ovpn-manager $version (linux-$arch)..."
-  curl -fsSL -o "$tmp" "$url" || error "Download failed. Check that version $version exists for linux-$arch"
+  if ! curl -fsSL -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    error "Download failed. Check that version $version exists for linux-$arch"
+  fi
   chmod 755 "$tmp"
   echo "$tmp"
 }
@@ -171,7 +176,7 @@ do_install() {
   sleep 2
   if command -v journalctl &>/dev/null; then
     local api_key
-    api_key=$(journalctl -u ovpn-manager --no-pager -n 20 2>/dev/null | grep -oP 'Generated API key: \K.*' || true)
+    api_key=$(journalctl -u ovpn-manager --no-pager -n 20 2>/dev/null | sed -n 's/.*Generated API key: //p' | tail -1 || true)
     if [[ -n "$api_key" ]]; then
       echo "  API Key: $api_key"
     else
@@ -194,15 +199,27 @@ do_upgrade() {
 
   info "Upgrading ovpn-manager to $version..."
 
-  # Download and replace binary
+  # Download new binary
   local tmp
   tmp=$(download_binary "$version" "$arch")
+
+  # Back up current binary for rollback
+  local backup="$INSTALL_DIR/$BINARY_NAME.bak"
+  cp "$INSTALL_DIR/$BINARY_NAME" "$backup"
+
+  # Replace binary and restart
   mv "$tmp" "$INSTALL_DIR/$BINARY_NAME"
   ok "Binary updated"
 
-  # Restart service
-  systemctl restart ovpn-manager
-  ok "Service restarted"
+  if systemctl restart ovpn-manager; then
+    rm -f "$backup"
+    ok "Service restarted"
+  else
+    warn "Service failed to start — rolling back..."
+    mv "$backup" "$INSTALL_DIR/$BINARY_NAME"
+    systemctl restart ovpn-manager 2>/dev/null || true
+    error "Upgrade failed. Previous version restored."
+  fi
 
   echo ""
   info "Upgrade to $version complete!"
@@ -233,7 +250,13 @@ do_uninstall() {
 
   # Ask about config/data
   echo ""
-  read -rp "Remove config and data at $CONFIG_DIR? [y/N] " confirm
+  local confirm=""
+  if [[ -t 0 ]]; then
+    read -rp "Remove config and data at $CONFIG_DIR? [y/N] " confirm
+  else
+    # stdin not a terminal (piped execution) — try /dev/tty
+    read -rp "Remove config and data at $CONFIG_DIR? [y/N] " confirm </dev/tty 2>/dev/null || true
+  fi
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     rm -rf "$CONFIG_DIR"
     ok "Config and data removed"
@@ -249,6 +272,27 @@ do_uninstall() {
 # --- Main ---
 
 main() {
+  # Auto-elevate to root (before arg parsing so $@ is preserved)
+  if [[ $EUID -ne 0 ]]; then
+    info "Root required — re-running with sudo..."
+    local self
+    self=$(mktemp /tmp/ovpn-manager-install.XXXXXX)
+    if [[ -f "$0" ]]; then
+      cp "$0" "$self"
+    else
+      # Piped execution — re-download for sudo re-exec
+      curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$self"
+    fi
+    chmod +x "$self"
+    exec sudo bash "$self" --_cleanup "$self" "$@"
+  fi
+
+  # Clean up temp file from sudo re-exec
+  if [[ "${1:-}" == "--_cleanup" ]]; then
+    rm -f "$2" 2>/dev/null
+    shift 2
+  fi
+
   local command="install"
   local version="latest"
 
@@ -260,23 +304,6 @@ main() {
       *) error "Unknown option: $1. Use --help for usage." ;;
     esac
   done
-
-  # Auto-elevate to root
-  if [[ $EUID -ne 0 ]]; then
-    info "Root required — re-running with sudo..."
-    # Save script to temp file so sudo can re-exec it (needed for curl | bash)
-    local self
-    self=$(mktemp /tmp/ovpn-manager-install.XXXXXX)
-    if [[ -f "$0" ]]; then
-      cp "$0" "$self"
-    else
-      # Piped execution — script is already fully loaded in memory via main()
-      # Re-download the script for sudo re-exec
-      curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$self"
-    fi
-    chmod +x "$self"
-    exec sudo bash "$self" "$@"
-  fi
 
   check_linux
 
