@@ -28,7 +28,7 @@ jobs:
 
       - run: bun test
 
-      - run: bun build src/index.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+      - run: bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4
         with:

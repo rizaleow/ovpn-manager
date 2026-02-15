@@ -17,7 +17,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; exit 1; }
 
 usage() {
   cat <<EOF
-Usage: $0 [command] [options]
+Usage: install.sh [command] [options]
 
 Commands:
   install     Install ovpn-manager (default)
@@ -29,10 +29,6 @@ Options:
   --help            Show this help message
 EOF
   exit 0
-}
-
-check_root() {
-  [[ $EUID -eq 0 ]] || error "This script must be run as root"
 }
 
 check_linux() {
@@ -186,7 +182,7 @@ do_upgrade() {
 
   [[ "$version" == "latest" ]] && version=$(get_latest_version)
 
-  [[ -f "$INSTALL_DIR/$BINARY_NAME" ]] || error "ovpn-manager is not installed. Run '$0 install' first."
+  [[ -f "$INSTALL_DIR/$BINARY_NAME" ]] || error "ovpn-manager is not installed. Run 'install.sh install' first."
 
   info "Upgrading ovpn-manager to $version..."
 
@@ -257,7 +253,23 @@ main() {
     esac
   done
 
-  check_root
+  # Auto-elevate to root
+  if [[ $EUID -ne 0 ]]; then
+    info "Root required — re-running with sudo..."
+    # Save script to temp file so sudo can re-exec it (needed for curl | bash)
+    local self
+    self=$(mktemp /tmp/ovpn-manager-install.XXXXXX)
+    if [[ -f "$0" ]]; then
+      cp "$0" "$self"
+    else
+      # Piped execution — script is already fully loaded in memory via main()
+      # Re-download the script for sudo re-exec
+      curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$self"
+    fi
+    chmod +x "$self"
+    exec sudo bash "$self" "$@"
+  fi
+
   check_linux
 
   case "$command" in
@@ -267,4 +279,5 @@ main() {
   esac
 }
 
+# Ensure entire script is downloaded before executing (for curl | bash)
 main "$@"

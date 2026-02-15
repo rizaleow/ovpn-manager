@@ -4,25 +4,48 @@ REST API for managing a local OpenVPN server and its clients on Linux (Debian/Ub
 
 Compiles to a single binary for easy deployment.
 
-## Requirements
+## Quick Install
+
+On a Debian/Ubuntu server with root access:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rizaleow/ovpn-manager/main/install.sh | bash
+```
+
+This installs the binary, system dependencies (OpenVPN, EasyRSA, iptables), systemd service, and default config.
+
+To install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rizaleow/ovpn-manager/main/install.sh | bash -s -- --version v0.0.2
+```
+
+Upgrade or uninstall:
+
+```bash
+install.sh upgrade
+install.sh uninstall
+```
+
+## Manual Install
+
+### Requirements
 
 - Linux (Debian/Ubuntu)
 - Bun v1.3+
 - Root access (for systemctl, iptables, sysctl)
 
-## Install
-
 ```bash
 bun install
 ```
 
-## Development
+### Development
 
 ```bash
 bun run dev
 ```
 
-## Build
+### Build
 
 ```bash
 # Native binary
@@ -30,6 +53,9 @@ bun run build
 
 # Cross-compile for Linux x64
 bun run build:linux
+
+# Cross-compile for Linux arm64
+bun run build:linux-arm64
 ```
 
 Produces a self-contained binary at `dist/ovpn-manager`.
