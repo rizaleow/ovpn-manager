@@ -30,6 +30,13 @@ jobs:
 
       - run: bun build src/index.ts --compile --minify --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
 
+      - name: Compress binary with UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          version: latest
+          files: dist/${{ matrix.artifact }}
+          args: --best --lzma
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

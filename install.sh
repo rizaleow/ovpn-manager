@@ -46,10 +46,11 @@ detect_arch() {
 }
 
 get_latest_version() {
-  local url="https://api.github.com/repos/$REPO/releases/latest"
-  local tag
-  tag=$(curl -fsSL "$url" | grep '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
-  [[ -n "$tag" ]] || error "Could not determine latest release version"
+  # Use redirect URL to avoid needing to parse JSON from the API
+  local url
+  url=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest")
+  local tag="${url##*/}"
+  [[ -n "$tag" ]] || error "Could not determine latest release version. Check that the repo has at least one release."
   echo "$tag"
 }
 
@@ -126,6 +127,7 @@ do_install() {
 
   # Install system dependencies
   info "Installing system dependencies..."
+  export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y openvpn easy-rsa iptables-persistent
 
