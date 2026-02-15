@@ -31,6 +31,7 @@ export function InstanceScreen({ config, instanceName, onNavigate, onBack }: Ins
   const [info, setInfo] = useState<InstanceInfo | null>(null);
   const [actionMsg, setActionMsg] = useState("");
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const instanceService = new InstanceService(config);
 
@@ -76,8 +77,12 @@ export function InstanceScreen({ config, instanceName, onNavigate, onBack }: Ins
     }
 
     if (key.name === "s") {
-      const openvpn = new OpenVPNService(info.instance);
+      // Re-check instance existence
+      const inst = instanceService.get(instanceName);
+      if (!inst) { onBack(); return; }
+      const openvpn = new OpenVPNService(inst);
       try {
+        setActionLoading(true);
         if (info.active) {
           setActionMsg("Stopping...");
           await openvpn.stop();
@@ -89,22 +94,29 @@ export function InstanceScreen({ config, instanceName, onNavigate, onBack }: Ins
           instanceService.updateStatus(instanceName, "active");
           setActionMsg("Started.");
         }
+        setActionLoading(false);
         refresh();
-      } catch (err: any) {
-        setActionMsg(`Error: ${err.message}`);
+      } catch (err) {
+        setActionLoading(false);
+        setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
 
     if (key.name === "x") {
-      const openvpn = new OpenVPNService(info.instance);
+      const inst = instanceService.get(instanceName);
+      if (!inst) { onBack(); return; }
+      const openvpn = new OpenVPNService(inst);
       try {
+        setActionLoading(true);
         setActionMsg("Restarting...");
         await openvpn.restart();
+        setActionLoading(false);
         setActionMsg("Restarted.");
         refresh();
-      } catch (err: any) {
-        setActionMsg(`Error: ${err.message}`);
+      } catch (err) {
+        setActionLoading(false);
+        setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -136,7 +148,8 @@ export function InstanceScreen({ config, instanceName, onNavigate, onBack }: Ins
         <text fg={colors.textDim}>Created:      {instance.created_at}</text>
       </box>
 
-      {actionMsg && (
+      {actionLoading && <Spinner label={actionMsg} />}
+      {!actionLoading && actionMsg && (
         <text fg={colors.warning}>{actionMsg}</text>
       )}
 

@@ -3,26 +3,6 @@ export interface ListenConfig {
   port: number;
 }
 
-export interface VpnConfig {
-  hostname: string;
-  port: number;
-  protocol: "udp" | "tcp";
-  devType: "tun" | "tap";
-  subnet: string;
-  subnetMask: string;
-  dns: string[];
-  cipher: string;
-}
-
-export interface PathsConfig {
-  easyrsaDir: string;
-  serverConfigPath: string;
-  statusFile: string;
-  logFile: string;
-  managementSocket: string;
-  clientConfigDir: string;
-}
-
 export interface BasePaths {
   serverDir: string;
   logDir: string;
@@ -32,8 +12,6 @@ export interface AppConfig {
   listen: ListenConfig;
   apiKey: string;
   dbPath: string;
-  vpn: VpnConfig;
-  paths: PathsConfig;
   basePaths: BasePaths;
   logLevel: "debug" | "info" | "warn" | "error";
 }

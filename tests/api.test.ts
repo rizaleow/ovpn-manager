@@ -5,7 +5,7 @@ import { initSchema } from "../src/db/schema.ts";
 import { authMiddleware } from "../src/middleware/auth.ts";
 import { errorHandler } from "../src/middleware/error-handler.ts";
 import { auditLogger } from "../src/middleware/logger.ts";
-import { instanceRoutes } from "../src/routes/instances.ts";
+import { instanceRoutes } from "../src/routes/instances/index.ts";
 import { globalStatusRoutes } from "../src/routes/status.ts";
 import type { AppConfig } from "../src/types/index.ts";
 
@@ -14,24 +14,6 @@ const TEST_CONFIG: AppConfig = {
   listen: { host: "127.0.0.1", port: 0 },
   apiKey: "test-api-key",
   dbPath: ":memory:",
-  vpn: {
-    hostname: "vpn.test.com",
-    port: 1194,
-    protocol: "udp",
-    devType: "tun",
-    subnet: "10.8.0.0",
-    subnetMask: "255.255.255.0",
-    dns: ["1.1.1.1"],
-    cipher: "AES-256-GCM",
-  },
-  paths: {
-    easyrsaDir: "/tmp/test-easyrsa",
-    serverConfigPath: "/tmp/test-server.conf",
-    statusFile: "/tmp/test-status.log",
-    logFile: "/tmp/test-openvpn.log",
-    managementSocket: "/tmp/test-mgmt.sock",
-    clientConfigDir: "/tmp/test-ccd",
-  },
   basePaths: {
     serverDir: "/tmp/test-openvpn-server",
     logDir: "/tmp/test-openvpn-log",
@@ -282,4 +264,42 @@ test("POST /api/instances rejects invalid name", async () => {
     body: JSON.stringify({ name: "invalid name!" }),
   });
   expect(res.status).toBe(400);
+});
+
+test("POST /api/instances rejects name with leading hyphen", async () => {
+  const res = await req("/api/instances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "-leading" }),
+  });
+  expect(res.status).toBe(400);
+});
+
+test("POST /api/instances rejects name with trailing hyphen", async () => {
+  const res = await req("/api/instances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "trailing-" }),
+  });
+  expect(res.status).toBe(400);
+});
+
+test("POST /api/instances accepts single-char valid name", async () => {
+  const res = await req("/api/instances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "x" }),
+  });
+  expect(res.status).toBe(201);
+  // Clean up
+  await req("/api/instances/x", { method: "DELETE" });
+});
+
+test("DELETE /api/instances/:name/network/iptables/:id rejects invalid rule ID", async () => {
+  const res = await req("/api/instances/test-instance/network/iptables/notanumber", {
+    method: "DELETE",
+  });
+  expect(res.status).toBe(400);
+  const body = await json(res);
+  expect(body.error).toBe("Invalid rule ID");
 });

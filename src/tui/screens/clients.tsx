@@ -18,9 +18,12 @@ interface ClientsScreenProps {
   onBack: () => void;
 }
 
+const PAGE_SIZE = 20;
+
 export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenProps) {
   const [clients, setClients] = useState<Client[]>([]);
   const [selected, setSelected] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionMsg, setActionMsg] = useState("");
   const [creating, setCreating] = useState(false);
@@ -83,11 +86,13 @@ export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenPro
         const db = getDb();
         db.run("UPDATE clients SET status = 'revoked', revoked_at = datetime('now') WHERE instance_id = ? AND name = ?", [inst.id, client.name]);
         const openvpn = new OpenVPNService(inst);
-        try { await openvpn.restart(); } catch {}
+        try { await openvpn.restart(); } catch (err) {
+          console.error("Failed to restart OpenVPN:", err);
+        }
         setActionMsg(`Revoked ${client.name}`);
         refresh();
-      } catch (err: any) {
-        setActionMsg(`Error: ${err.message}`);
+      } catch (err) {
+        setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -99,17 +104,35 @@ export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenPro
       try {
         const profile = new ProfileService(inst);
         const ovpn = await profile.generateProfile(client.name);
-        const outPath = `${process.cwd()}/${client.name}.ovpn`;
+        const outPath = `${process.env.HOME ?? process.cwd()}/${client.name}.ovpn`;
         await Bun.write(outPath, ovpn);
         setActionMsg(`Profile saved: ${outPath}`);
-      } catch (err: any) {
-        setActionMsg(`Error: ${err.message}`);
+      } catch (err) {
+        setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
 
     if (key.name === "r") {
       refresh();
+      return;
+    }
+
+    // Pagination
+    if (key.sequence === "]") {
+      const maxPage = Math.max(0, Math.ceil(clients.length / PAGE_SIZE) - 1);
+      if (page < maxPage) {
+        setPage((p) => p + 1);
+        setSelected(0);
+      }
+      return;
+    }
+
+    if (key.sequence === "[") {
+      if (page > 0) {
+        setPage((p) => p - 1);
+        setSelected(0);
+      }
       return;
     }
   });
@@ -134,8 +157,8 @@ export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenPro
       setCreating(false);
       setNewClientName("");
       refresh();
-    } catch (err: any) {
-      setActionMsg(`Error: ${err.message}`);
+    } catch (err) {
+      setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
       setCreating(false);
     }
   }, [newClientName, instanceName]);
@@ -172,27 +195,32 @@ export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenPro
         <text fg={colors.textDim}>No clients. Press [n] to create one.</text>
       )}
 
-      {!creating && clients.length > 0 && (
-        <box style={{ flexDirection: "column" }}>
-          <text fg={colors.textDim}>
-            {"  NAME                STATUS    CREATED"}
-          </text>
-          {clients.map((client, i) => {
-            const isSelected = i === selected;
-            const statusColor = client.status === "active" ? colors.success : client.status === "revoked" ? colors.error : colors.warning;
-            return (
-              <box key={client.id} style={{ height: 1 }}>
-                <text fg={isSelected ? colors.primary : colors.text}>
-                  {isSelected ? "> " : "  "}
-                  {client.name.padEnd(20)}
-                </text>
-                <text fg={statusColor}>{client.status.padEnd(10)}</text>
-                <text fg={colors.textDim}>{client.created_at.slice(0, 10)}</text>
-              </box>
-            );
-          })}
-        </box>
-      )}
+      {!creating && clients.length > 0 && (() => {
+        const totalPages = Math.ceil(clients.length / PAGE_SIZE);
+        const pageClients = clients.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        return (
+          <box style={{ flexDirection: "column" }}>
+            <text fg={colors.textDim}>
+              {"  NAME                STATUS    CREATED"}
+              {totalPages > 1 ? `  (Page ${page + 1}/${totalPages})` : ""}
+            </text>
+            {pageClients.map((client, i) => {
+              const isSelected = i === selected;
+              const statusColor = client.status === "active" ? colors.success : client.status === "revoked" ? colors.error : colors.warning;
+              return (
+                <box key={client.id} style={{ height: 1 }}>
+                  <text fg={isSelected ? colors.primary : colors.text}>
+                    {isSelected ? "> " : "  "}
+                    {client.name.padEnd(20)}
+                  </text>
+                  <text fg={statusColor}>{client.status.padEnd(10)}</text>
+                  <text fg={colors.textDim}>{client.created_at.slice(0, 10)}</text>
+                </box>
+              );
+            })}
+          </box>
+        );
+      })()}
 
       {actionMsg && <text fg={colors.warning}>{actionMsg}</text>}
 
@@ -201,6 +229,7 @@ export function ClientsScreen({ config, instanceName, onBack }: ClientsScreenPro
           { key: "n", label: "New" },
           { key: "d", label: "Revoke" },
           { key: "p", label: "Save Profile" },
+          { key: "[/]", label: "Page" },
           { key: "r", label: "Refresh" },
           { key: "Esc", label: "Back" },
         ]}

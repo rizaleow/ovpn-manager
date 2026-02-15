@@ -4,7 +4,7 @@ import { initDb, closeDb } from "../db/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { errorHandler } from "../middleware/error-handler.ts";
 import { auditLogger } from "../middleware/logger.ts";
-import { instanceRoutes } from "../routes/instances.ts";
+import { instanceRoutes } from "../routes/instances/index.ts";
 import { globalStatusRoutes } from "../routes/status.ts";
 
 export async function startServer(configPath?: string): Promise<void> {

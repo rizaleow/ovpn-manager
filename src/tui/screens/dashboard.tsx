@@ -21,6 +21,7 @@ export function Dashboard({ config, onNavigate, onQuit }: DashboardProps) {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const instanceService = new InstanceService(config);
 
   const refresh = useCallback(() => {
@@ -36,6 +37,18 @@ export function Dashboard({ config, onNavigate, onQuit }: DashboardProps) {
   useRefresh(refresh, 5000);
 
   useKeyboard((key) => {
+    // Handle delete confirmation
+    if (confirmDelete !== null) {
+      if (key.name === "y") {
+        const name = confirmDelete;
+        setConfirmDelete(null);
+        instanceService.delete(name).then(refresh);
+      } else if (key.name === "n" || key.name === "escape") {
+        setConfirmDelete(null);
+      }
+      return;
+    }
+
     if (key.name === "q") {
       onQuit();
       return;
@@ -72,7 +85,7 @@ export function Dashboard({ config, onNavigate, onQuit }: DashboardProps) {
     if (key.name === "d" && instances.length > 0) {
       const inst = instances[selected];
       if (inst) {
-        instanceService.delete(inst.name).then(refresh);
+        setConfirmDelete(inst.name);
       }
       return;
     }
@@ -118,6 +131,12 @@ export function Dashboard({ config, onNavigate, onQuit }: DashboardProps) {
             );
           })}
         </box>
+      )}
+
+      {confirmDelete !== null && (
+        <text fg={colors.warning}>
+          Delete "{confirmDelete}"? [y/N]
+        </text>
       )}
 
       <NavBar

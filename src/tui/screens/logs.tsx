@@ -19,6 +19,7 @@ export function LogsScreen({ config, instanceName, onBack }: LogsScreenProps) {
   const [logLines, setLogLines] = useState<string[]>([]);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [userScrolled, setUserScrolled] = useState(false);
   const { height } = useTerminalDimensions();
 
   const instanceService = new InstanceService(config);
@@ -32,7 +33,9 @@ export function LogsScreen({ config, instanceName, onBack }: LogsScreenProps) {
       const logs = await openvpn.getLogs(200);
       const lines = logs.split("\n");
       setLogLines(lines);
-      setScrollOffset(Math.max(0, lines.length - visibleLines));
+      if (!userScrolled) {
+        setScrollOffset(Math.max(0, lines.length - visibleLines));
+      }
       setLoading(false);
     } catch {
       setLogLines(["No logs available"]);
@@ -49,31 +52,37 @@ export function LogsScreen({ config, instanceName, onBack }: LogsScreenProps) {
     }
 
     if (key.name === "up" || key.name === "k") {
+      setUserScrolled(true);
       setScrollOffset((s) => Math.max(0, s - 1));
       return;
     }
 
     if (key.name === "down" || key.name === "j") {
+      setUserScrolled(true);
       setScrollOffset((s) => Math.min(Math.max(0, logLines.length - visibleLines), s + 1));
       return;
     }
 
     if (key.name === "pageup") {
+      setUserScrolled(true);
       setScrollOffset((s) => Math.max(0, s - visibleLines));
       return;
     }
 
     if (key.name === "pagedown") {
+      setUserScrolled(true);
       setScrollOffset((s) => Math.min(Math.max(0, logLines.length - visibleLines), s + visibleLines));
       return;
     }
 
     if (key.name === "home" || key.name === "g") {
+      setUserScrolled(true);
       setScrollOffset(0);
       return;
     }
 
     if (key.name === "end") {
+      setUserScrolled(false);
       setScrollOffset(Math.max(0, logLines.length - visibleLines));
       return;
     }

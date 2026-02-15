@@ -32,8 +32,8 @@ export function auditLogger() {
             status < 400 ? 1 : 0,
           ],
         );
-      } catch {
-        // Don't fail the request if audit logging fails
+      } catch (err) {
+        console.error("Audit log write failed:", err);
       }
     }
   });

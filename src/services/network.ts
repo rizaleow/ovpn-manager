@@ -1,11 +1,11 @@
-import { exec, execShell } from "../utils/shell.ts";
+import { exec } from "../utils/shell.ts";
 import type { Instance } from "../types/index.ts";
 
 export class NetworkService {
   private tunDevice: string;
 
-  constructor(instance?: Instance) {
-    this.tunDevice = instance ? `tun_${instance.name}` : "tun0";
+  constructor(instance: Instance) {
+    this.tunDevice = `tun_${instance.name}`;
   }
 
   async enableForwarding(): Promise<void> {
@@ -108,7 +108,8 @@ export class NetworkService {
   }
 
   async persistIptables(): Promise<void> {
-    await execShell("iptables-save > /etc/iptables/rules.v4");
+    const output = await exec(["iptables-save"]);
+    await Bun.write("/etc/iptables/rules.v4", output);
   }
 
   async listNATRules(): Promise<string> {

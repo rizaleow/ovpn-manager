@@ -5,7 +5,7 @@ export const createInstance = z.object({
     .string()
     .min(1)
     .max(32)
-    .regex(/^[a-zA-Z0-9-]+$/, "Name must be alphanumeric with dashes"),
+    .regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/, "Name must be alphanumeric with dashes, no leading/trailing hyphens"),
   displayName: z.string().max(64).optional(),
 });
 

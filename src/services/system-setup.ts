@@ -58,24 +58,6 @@ WantedBy=multi-user.target
         listen: { host: "127.0.0.1", port: 3000 },
         apiKey: "",
         dbPath: `${CONFIG_DIR}/ovpn-manager.db`,
-        vpn: {
-          hostname: "vpn.example.com",
-          port: 1194,
-          protocol: "udp",
-          devType: "tun",
-          subnet: "10.8.0.0",
-          subnetMask: "255.255.255.0",
-          dns: ["1.1.1.1", "1.0.0.1"],
-          cipher: "AES-256-GCM",
-        },
-        paths: {
-          easyrsaDir: "/etc/openvpn/easy-rsa",
-          serverConfigPath: "/etc/openvpn/server.conf",
-          statusFile: "/var/log/openvpn/status.log",
-          logFile: "/var/log/openvpn/openvpn.log",
-          managementSocket: "/var/run/openvpn/management.sock",
-          clientConfigDir: "/etc/openvpn/ccd",
-        },
         basePaths: {
           serverDir: "/etc/openvpn/server",
           logDir: "/var/log/openvpn",
@@ -86,13 +68,8 @@ WantedBy=multi-user.target
     }
   }
 
-  isFirstRun(): boolean {
-    try {
-      const { existsSync } = require("node:fs");
-      return !existsSync(`${CONFIG_DIR}/config.json`);
-    } catch {
-      return true;
-    }
+  async isFirstRun(): Promise<boolean> {
+    return !(await Bun.file(`${CONFIG_DIR}/config.json`).exists());
   }
 }
 

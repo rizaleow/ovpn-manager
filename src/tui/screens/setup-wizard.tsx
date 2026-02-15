@@ -9,6 +9,7 @@ import { InstanceService } from "../../services/instance.ts";
 import { PKIService } from "../../services/pki.ts";
 import { OpenVPNService } from "../../services/openvpn.ts";
 import { NetworkService } from "../../services/network.ts";
+import { SystemSetupService } from "../../services/system-setup.ts";
 import { getDb } from "../../db/index.ts";
 import type { Screen } from "../hooks/use-navigation.ts";
 
@@ -40,6 +41,7 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
   const [focused, setFocused] = useState<string>("name");
   const [runStatus, setRunStatus] = useState("");
   const [error, setError] = useState("");
+  const [validationError, setValidationError] = useState("");
   const [form, setForm] = useState<FormData>({
     name: "",
     displayName: "",
@@ -56,13 +58,53 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
     setForm((f) => ({ ...f, [field]: value }));
   }, []);
 
+  const validateStep = useCallback((currentStep: Step): string | null => {
+    const nameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
+    const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+
+    switch (currentStep) {
+      case "name":
+        if (!form.name || !nameRegex.test(form.name) || form.name.length > 32) {
+          return "Name must be 1-32 alphanumeric chars with dashes, no leading/trailing hyphens";
+        }
+        return null;
+      case "hostname":
+        if (!form.hostname.trim()) return "Hostname is required";
+        return null;
+      case "port": {
+        const port = parseInt(form.port, 10);
+        if (isNaN(port) || port < 1 || port > 65535) return "Port must be 1-65535";
+        return null;
+      }
+      case "subnet":
+        if (!ipRegex.test(form.subnet)) return "Subnet must be a valid IP (e.g. 10.8.0.0)";
+        return null;
+      case "dns": {
+        const dnsList = form.dns.split(",").map((d) => d.trim()).filter(Boolean);
+        if (dnsList.length === 0) return "At least one DNS server is required";
+        for (const d of dnsList) {
+          if (!ipRegex.test(d)) return `Invalid DNS IP: ${d}`;
+        }
+        return null;
+      }
+      default:
+        return null;
+    }
+  }, [form]);
+
   const nextStep = useCallback(() => {
+    const err = validateStep(step);
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+    setValidationError("");
     const nextIdx = stepIndex + 1;
     if (nextIdx < STEPS.length) {
       setStepIndex(nextIdx);
       setStep(STEPS[nextIdx]!);
     }
-  }, [stepIndex]);
+  }, [stepIndex, step, validateStep]);
 
   const prevStep = useCallback(() => {
     if (stepIndex > 0) {
@@ -79,6 +121,15 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
     const instanceService = new InstanceService(config);
 
     try {
+      // Check dependencies first
+      setRunStatus("Checking dependencies...");
+      const systemSetup = new SystemSetupService();
+      const deps = await systemSetup.checkDependencies();
+      if (!deps.openvpn || !deps.easyrsa || !deps.iptables) {
+        const missing = Object.entries(deps).filter(([, v]) => !v).map(([k]) => k);
+        throw new Error(`Missing dependencies: ${missing.join(", ")}. Run 'ovpn-manager setup' first.`);
+      }
+
       setRunStatus("Creating instance...");
       const instance = await instanceService.create(form.name, form.displayName || undefined);
 
@@ -88,6 +139,7 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
       const network = new NetworkService(instance);
 
       setRunStatus("Initializing PKI (this may take a while)...");
+      db.run("UPDATE setup_state SET step = 'pki_initialized', started_at = datetime('now') WHERE instance_id = ?", [instance.id]);
       await pki.initPKI();
       await pki.buildCA();
       await pki.genServerCert();
@@ -96,6 +148,7 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
       await pki.genCRL();
 
       setRunStatus("Configuring server...");
+      db.run("UPDATE setup_state SET step = 'server_configured' WHERE instance_id = ?", [instance.id]);
       const dnsList = form.dns.split(",").map((d) => d.trim()).filter(Boolean);
       db.run(
         `UPDATE server_config SET
@@ -117,20 +170,22 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
       await openvpn.writeServerConfig();
 
       setRunStatus("Setting up networking...");
+      db.run("UPDATE setup_state SET step = 'network_configured' WHERE instance_id = ?", [instance.id]);
       await network.enableForwarding();
       await network.setupNAT(form.subnet, form.subnetMask);
       await network.persistIptables();
 
       setRunStatus("Starting OpenVPN...");
+      db.run("UPDATE setup_state SET step = 'running' WHERE instance_id = ?", [instance.id]);
       await openvpn.enable();
       await openvpn.start();
 
       instanceService.updateStatus(instance.name, "active");
-      db.run("UPDATE setup_state SET completed = 1, step = 'running', completed_at = datetime('now') WHERE instance_id = ?", [instance.id]);
+      db.run("UPDATE setup_state SET completed = 1, completed_at = datetime('now') WHERE instance_id = ?", [instance.id]);
 
       setStep("done");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
       setStep("error");
     }
   }, [config, form]);
@@ -207,6 +262,10 @@ export function SetupWizard({ config, onNavigate, onBack }: SetupWizardProps) {
     <box style={{ flexDirection: "column", padding: 1, gap: 1 }}>
       <Header title="Setup Wizard" breadcrumb={["New Instance"]} />
       <text fg={colors.textDim}>{progress}</text>
+
+      {validationError && (
+        <text fg={colors.error}>{validationError}</text>
+      )}
 
       {step === "name" && (
         <box style={{ flexDirection: "column", gap: 1 }}>

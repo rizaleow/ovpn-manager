@@ -19,8 +19,8 @@ export function useService<T>() {
       const data = await fn();
       setState({ data, loading: false, error: null });
       return data;
-    } catch (err: any) {
-      setState({ data: null, loading: false, error: err.message });
+    } catch (err) {
+      setState({ data: null, loading: false, error: err instanceof Error ? err.message : String(err) });
       return null;
     }
   }, []);
