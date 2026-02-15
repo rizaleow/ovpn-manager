@@ -46,10 +46,16 @@ detect_arch() {
 }
 
 get_latest_version() {
-  # Use redirect URL to avoid needing to parse JSON from the API
-  local url
-  url=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest")
-  local tag="${url##*/}"
+  local tag
+  # Try /releases/latest first (skips pre-releases)
+  tag=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest")
+  tag="${tag##*/}"
+
+  # If no stable release found, fall back to newest release (including pre-releases)
+  if [[ -z "$tag" || "$tag" == "releases" ]]; then
+    tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
+  fi
+
   [[ -n "$tag" ]] || error "Could not determine latest release version. Check that the repo has at least one release."
   echo "$tag"
 }
