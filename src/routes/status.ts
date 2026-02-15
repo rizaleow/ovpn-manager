@@ -1,56 +1,45 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
-import { paginationQuery } from "../schemas/common.ts";
-import { StatusMonitor } from "../services/status-monitor.ts";
+import { getDb } from "../db/index.ts";
+import { InstanceService } from "../services/instance.ts";
 import { OpenVPNService } from "../services/openvpn.ts";
-import type { AppConfig } from "../types/index.ts";
+import { StatusMonitor } from "../services/status-monitor.ts";
+import type { AppConfig, Instance } from "../types/index.ts";
 import { exec } from "../utils/shell.ts";
 
-export function statusRoutes(config: AppConfig) {
+export function globalStatusRoutes(config: AppConfig) {
   const app = new Hono();
-  const monitor = new StatusMonitor(config);
-  const openvpn = new OpenVPNService(config);
+  const instanceService = new InstanceService(config);
 
-  // GET /api/status — full overview
+  // GET /api/status — Global overview across all instances
   app.get("/", async (c) => {
-    const [active, connections, bandwidth] = await Promise.all([
-      openvpn.isActive(),
-      monitor.getActiveConnections(),
-      monitor.getBandwidthStats(),
-    ]);
+    const instances = instanceService.list();
+    const results = await Promise.all(
+      instances.map(async (instance) => {
+        const openvpn = new OpenVPNService(instance);
+        const monitor = new StatusMonitor(instance);
+        const [active, connections] = await Promise.all([
+          openvpn.isActive(),
+          monitor.getActiveConnections(),
+        ]);
+        return {
+          name: instance.name,
+          displayName: instance.display_name,
+          status: instance.status,
+          active,
+          connections: connections.length,
+        };
+      }),
+    );
 
     return c.json({
-      server: { active, connections: connections.length },
-      activeConnections: connections,
-      bandwidthSummary: bandwidth.slice(0, 10),
+      instances: results,
+      total: instances.length,
+      activeCount: results.filter((r) => r.active).length,
+      totalConnections: results.reduce((sum, r) => sum + r.connections, 0),
     });
   });
 
-  // GET /api/status/connections
-  app.get("/connections", async (c) => {
-    const connections = await monitor.getActiveConnections();
-    // Also record a snapshot
-    await monitor.recordSnapshot();
-    return c.json({ connections });
-  });
-
-  // GET /api/status/connections/history
-  app.get("/connections/history", zValidator("query", paginationQuery), async (c) => {
-    const { page, limit } = c.req.valid("query");
-    const { rows, total } = await monitor.getConnectionHistory(page, limit);
-    return c.json({
-      connections: rows,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-    });
-  });
-
-  // GET /api/status/bandwidth
-  app.get("/bandwidth", async (c) => {
-    const stats = await monitor.getBandwidthStats();
-    return c.json({ bandwidth: stats });
-  });
-
-  // GET /api/status/system
+  // GET /api/status/system — System-level info
   app.get("/system", async (c) => {
     const [loadavg, meminfo, diskUsage] = await Promise.all([
       Bun.file("/proc/loadavg").text().catch(() => "N/A"),

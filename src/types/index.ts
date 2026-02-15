@@ -23,17 +23,46 @@ export interface PathsConfig {
   clientConfigDir: string;
 }
 
+export interface BasePaths {
+  serverDir: string;
+  logDir: string;
+}
+
 export interface AppConfig {
   listen: ListenConfig;
   apiKey: string;
   dbPath: string;
   vpn: VpnConfig;
   paths: PathsConfig;
+  basePaths: BasePaths;
   logLevel: "debug" | "info" | "warn" | "error";
+}
+
+export interface Instance {
+  id: number;
+  name: string;
+  display_name: string | null;
+  status: "setup" | "active" | "inactive" | "error";
+  easyrsa_dir: string;
+  config_path: string;
+  status_file: string;
+  log_file: string;
+  ccd_dir: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstancePaths {
+  easyrsaDir: string;
+  configPath: string;
+  statusFile: string;
+  logFile: string;
+  ccdDir: string;
 }
 
 export interface Client {
   id: number;
+  instance_id: number;
   name: string;
   email: string | null;
   status: "active" | "revoked" | "expired";
@@ -47,6 +76,7 @@ export interface Client {
 
 export interface ConnectionLog {
   id: number;
+  instance_id: number | null;
   client_id: number | null;
   client_name: string;
   real_address: string;

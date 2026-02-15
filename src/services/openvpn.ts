@@ -1,33 +1,36 @@
 import { exec } from "../utils/shell.ts";
-import type { AppConfig } from "../types/index.ts";
+import type { Instance } from "../types/index.ts";
+import { getDb } from "../db/index.ts";
 import { PKIService } from "./pki.ts";
 
 export class OpenVPNService {
   private pki: PKIService;
+  private serviceName: string;
 
-  constructor(private config: AppConfig) {
-    this.pki = new PKIService(config);
+  constructor(private instance: Instance) {
+    this.pki = new PKIService(instance);
+    this.serviceName = `openvpn-server@${instance.name}`;
   }
 
   async start(): Promise<void> {
-    await exec(["systemctl", "start", "openvpn@server"]);
+    await exec(["systemctl", "start", this.serviceName]);
   }
 
   async stop(): Promise<void> {
-    await exec(["systemctl", "stop", "openvpn@server"]);
+    await exec(["systemctl", "stop", this.serviceName]);
   }
 
   async restart(): Promise<void> {
-    await exec(["systemctl", "restart", "openvpn@server"]);
+    await exec(["systemctl", "restart", this.serviceName]);
   }
 
   async enable(): Promise<void> {
-    await exec(["systemctl", "enable", "openvpn@server"]);
+    await exec(["systemctl", "enable", this.serviceName]);
   }
 
   async isActive(): Promise<boolean> {
     try {
-      const result = await exec(["systemctl", "is-active", "openvpn@server"]);
+      const result = await exec(["systemctl", "is-active", this.serviceName]);
       return result.trim() === "active";
     } catch {
       return false;
@@ -36,7 +39,7 @@ export class OpenVPNService {
 
   async getStatus(): Promise<{ active: boolean; output: string }> {
     try {
-      const output = await exec(["systemctl", "status", "openvpn@server"]);
+      const output = await exec(["systemctl", "status", this.serviceName]);
       return { active: true, output };
     } catch (e: any) {
       return { active: false, output: e.stderr || e.message };
@@ -45,18 +48,17 @@ export class OpenVPNService {
 
   async getLogs(lines = 100): Promise<string> {
     try {
-      return await exec(["tail", "-n", String(lines), this.config.paths.logFile]);
+      return await exec(["tail", "-n", String(lines), this.instance.log_file]);
     } catch {
       // Fallback to journalctl
-      return await exec(["journalctl", "-u", "openvpn@server", "-n", String(lines), "--no-pager"]);
+      return await exec(["journalctl", "-u", this.serviceName, "-n", String(lines), "--no-pager"]);
     }
   }
 
   async generateServerConfig(overrides?: Record<string, any>): Promise<string> {
-    const db = (await import("../db/index.ts")).getDb();
-    const row: any = db.query("SELECT * FROM server_config WHERE id = 1").get();
+    const db = getDb();
+    const row: any = db.query("SELECT * FROM server_config WHERE instance_id = ?").get(this.instance.id);
 
-    const hostname = overrides?.hostname ?? row.hostname;
     const port = overrides?.port ?? row.port;
     const protocol = overrides?.protocol ?? row.protocol;
     const devType = overrides?.dev_type ?? row.dev_type;
@@ -98,8 +100,8 @@ export class OpenVPNService {
     }
     lines.push("");
 
-    lines.push(`ifconfig-pool-persist /var/log/openvpn/ipp.txt`);
-    lines.push(`client-config-dir ${this.config.paths.clientConfigDir}`);
+    lines.push(`ifconfig-pool-persist /var/log/openvpn/${this.instance.name}-ipp.txt`);
+    lines.push(`client-config-dir ${this.instance.ccd_dir}`);
     lines.push("");
 
     for (const d of dns) {
@@ -136,8 +138,8 @@ export class OpenVPNService {
     lines.push("persist-key");
     lines.push("persist-tun");
     lines.push("");
-    lines.push(`status ${this.config.paths.statusFile} 10`);
-    lines.push(`log-append ${this.config.paths.logFile}`);
+    lines.push(`status ${this.instance.status_file} 10`);
+    lines.push(`log-append ${this.instance.log_file}`);
     lines.push("verb 3");
     lines.push("mute 20");
     lines.push("");
@@ -148,6 +150,6 @@ export class OpenVPNService {
 
   async writeServerConfig(): Promise<void> {
     const conf = await this.generateServerConfig();
-    await Bun.write(this.config.paths.serverConfigPath, conf);
+    await Bun.write(this.instance.config_path, conf);
   }
 }

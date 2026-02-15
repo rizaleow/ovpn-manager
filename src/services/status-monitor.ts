@@ -1,11 +1,11 @@
-import type { AppConfig, ActiveConnection } from "../types/index.ts";
+import type { Instance, ActiveConnection } from "../types/index.ts";
 import { getDb } from "../db/index.ts";
 
 export class StatusMonitor {
-  constructor(private config: AppConfig) {}
+  constructor(private instance: Instance) {}
 
   async getActiveConnections(): Promise<ActiveConnection[]> {
-    const statusFile = this.config.paths.statusFile;
+    const statusFile = this.instance.status_file;
     const file = Bun.file(statusFile);
 
     if (!(await file.exists())) {
@@ -75,12 +75,13 @@ export class StatusMonitor {
     const db = getDb();
 
     const insert = db.prepare(
-      `INSERT OR REPLACE INTO connection_log (client_name, real_address, virtual_address, bytes_received, bytes_sent, connected_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO connection_log (instance_id, client_name, real_address, virtual_address, bytes_received, bytes_sent, connected_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
     for (const conn of connections) {
       insert.run(
+        this.instance.id,
         conn.commonName,
         conn.realAddress,
         conn.virtualAddress,
@@ -97,11 +98,11 @@ export class StatusMonitor {
 
     const rows = db
       .query(
-        `SELECT * FROM connection_log ORDER BY connected_at DESC LIMIT ? OFFSET ?`,
+        `SELECT * FROM connection_log WHERE instance_id = ? ORDER BY connected_at DESC LIMIT ? OFFSET ?`,
       )
-      .all(limit, offset);
+      .all(this.instance.id, limit, offset);
 
-    const total = (db.query("SELECT COUNT(*) as count FROM connection_log").get() as any).count;
+    const total = (db.query("SELECT COUNT(*) as count FROM connection_log WHERE instance_id = ?").get(this.instance.id) as any).count;
 
     return { rows, total };
   }
@@ -116,9 +117,10 @@ export class StatusMonitor {
                 COUNT(*) as connection_count,
                 MAX(connected_at) as last_connected
          FROM connection_log
+         WHERE instance_id = ?
          GROUP BY client_name
          ORDER BY total_received DESC`,
       )
-      .all();
+      .all(this.instance.id);
   }
 }

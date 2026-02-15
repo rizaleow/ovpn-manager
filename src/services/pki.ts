@@ -1,5 +1,5 @@
 import { exec } from "../utils/shell.ts";
-import type { AppConfig } from "../types/index.ts";
+import type { Instance } from "../types/index.ts";
 
 const EASYRSA_BIN = "/usr/share/easy-rsa/easyrsa";
 
@@ -7,8 +7,8 @@ export class PKIService {
   private pkiDir: string;
   private easyrsaDir: string;
 
-  constructor(private config: AppConfig) {
-    this.easyrsaDir = config.paths.easyrsaDir;
+  constructor(private instance: Instance) {
+    this.easyrsaDir = instance.easyrsa_dir;
     this.pkiDir = `${this.easyrsaDir}/pki`;
   }
 

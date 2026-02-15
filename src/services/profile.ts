@@ -1,17 +1,17 @@
 import { PKIService } from "./pki.ts";
 import { getDb } from "../db/index.ts";
-import type { AppConfig } from "../types/index.ts";
+import type { Instance } from "../types/index.ts";
 
 export class ProfileService {
   private pki: PKIService;
 
-  constructor(private config: AppConfig) {
-    this.pki = new PKIService(config);
+  constructor(private instance: Instance) {
+    this.pki = new PKIService(instance);
   }
 
   async generateProfile(clientName: string): Promise<string> {
     const db = getDb();
-    const serverConfig: any = db.query("SELECT * FROM server_config WHERE id = 1").get();
+    const serverConfig: any = db.query("SELECT * FROM server_config WHERE instance_id = ?").get(this.instance.id);
 
     const ca = await this.pki.getCA();
     const cert = await this.pki.getClientCert(clientName);

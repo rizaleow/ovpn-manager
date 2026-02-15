@@ -1,6 +1,13 @@
 import { exec, execShell } from "../utils/shell.ts";
+import type { Instance } from "../types/index.ts";
 
 export class NetworkService {
+  private tunDevice: string;
+
+  constructor(instance?: Instance) {
+    this.tunDevice = instance ? `tun_${instance.name}` : "tun0";
+  }
+
   async enableForwarding(): Promise<void> {
     await exec(["sysctl", "-w", "net.ipv4.ip_forward=1"]);
     await Bun.write(
@@ -49,26 +56,55 @@ export class NetworkService {
     // FORWARD from VPN
     await exec([
       "iptables", "-C", "FORWARD",
-      "-i", "tun0", "-o", iface, "-j", "ACCEPT",
+      "-i", this.tunDevice, "-o", iface, "-j", "ACCEPT",
     ]).catch(() =>
       exec([
         "iptables", "-A", "FORWARD",
-        "-i", "tun0", "-o", iface, "-j", "ACCEPT",
+        "-i", this.tunDevice, "-o", iface, "-j", "ACCEPT",
       ])
     );
 
     // FORWARD to VPN (established)
     await exec([
       "iptables", "-C", "FORWARD",
-      "-i", iface, "-o", "tun0",
+      "-i", iface, "-o", this.tunDevice,
       "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
     ]).catch(() =>
       exec([
         "iptables", "-A", "FORWARD",
-        "-i", iface, "-o", "tun0",
+        "-i", iface, "-o", this.tunDevice,
         "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
       ])
     );
+  }
+
+  async removeNAT(subnet: string, subnetMask: string): Promise<void> {
+    const iface = await this.getDefaultInterface();
+    const cidr = this.maskToCidr(subnetMask);
+
+    try {
+      await exec([
+        "iptables", "-t", "nat", "-D", "POSTROUTING",
+        "-s", `${subnet}/${cidr}`, "-o", iface, "-j", "MASQUERADE",
+      ]);
+    } catch {
+      // Rule may not exist
+    }
+
+    try {
+      await exec([
+        "iptables", "-D", "FORWARD",
+        "-i", this.tunDevice, "-o", iface, "-j", "ACCEPT",
+      ]);
+    } catch {}
+
+    try {
+      await exec([
+        "iptables", "-D", "FORWARD",
+        "-i", iface, "-o", this.tunDevice,
+        "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
+      ]);
+    } catch {}
   }
 
   async persistIptables(): Promise<void> {
@@ -110,7 +146,7 @@ export class NetworkService {
     return await exec(["ip", "-j", "addr", "show"]);
   }
 
-  private maskToCidr(mask: string): number {
+  maskToCidr(mask: string): number {
     return mask
       .split(".")
       .reduce((bits, octet) => bits + (Number(octet) >>> 0).toString(2).replace(/0/g, "").length, 0);

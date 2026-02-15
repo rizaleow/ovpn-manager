@@ -4,275 +4,30 @@ set -euo pipefail
 REPO="rizaleow/ovpn-manager"
 BINARY_NAME="ovpn-manager"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/ovpn-manager"
-CONFIG_FILE="$CONFIG_DIR/config.json"
-SERVICE_FILE="/etc/systemd/system/ovpn-manager.service"
 
 # --- Helpers ---
 
 info()  { echo -e "\033[1;34m[INFO]\033[0m  $*" >&2; }
 ok()    { echo -e "\033[1;32m[OK]\033[0m    $*" >&2; }
-warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*" >&2; }
 error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Usage: install.sh [command] [options]
+Usage: curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | sudo bash
 
-Commands:
-  install     Install ovpn-manager (default)
-  upgrade     Upgrade to a new version
-  uninstall   Remove ovpn-manager
+Downloads the ovpn-manager binary. Run 'sudo ovpn-manager setup' to complete installation.
 
 Options:
-  --version <tag>   Specify version to install (e.g. v1.0.0). Default: latest
+  --version <tag>   Specify version (e.g. v1.0.0). Default: latest
   --help            Show this help message
 EOF
   exit 0
 }
 
-check_linux() {
-  [[ "$(uname -s)" == "Linux" ]] || error "This script only supports Linux"
-  command -v apt-get &>/dev/null || error "This script requires apt-get (Debian/Ubuntu). Install dependencies manually on other distros."
-  command -v systemctl &>/dev/null || error "This script requires systemd. Install and manage the service manually on other init systems."
-}
-
-detect_arch() {
-  local arch
-  arch="$(uname -m)"
-  case "$arch" in
-    x86_64)  echo "x64" ;;
-    aarch64) echo "arm64" ;;
-    *)       error "Unsupported architecture: $arch" ;;
-  esac
-}
-
-get_latest_version() {
-  local tag
-  # Try /releases/latest first (skips pre-releases)
-  tag=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest")
-  tag="${tag##*/}"
-
-  # If no stable release found, fall back to newest release (including pre-releases)
-  if [[ -z "$tag" || "$tag" == "releases" ]]; then
-    tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
-  fi
-
-  [[ -n "$tag" ]] || error "Could not determine latest release version. Check that the repo has at least one release."
-  echo "$tag"
-}
-
-download_binary() {
-  local version="$1"
-  local arch="$2"
-  local url="https://github.com/$REPO/releases/download/$version/ovpn-manager-linux-$arch"
-  local tmp
-  tmp=$(mktemp)
-
-  info "Downloading ovpn-manager $version (linux-$arch)..."
-  if ! curl -fsSL -o "$tmp" "$url"; then
-    rm -f "$tmp"
-    error "Download failed. Check that version $version exists for linux-$arch"
-  fi
-  chmod 755 "$tmp"
-  echo "$tmp"
-}
-
-install_service() {
-  cat > "$SERVICE_FILE" <<'UNIT'
-[Unit]
-Description=OpenVPN Manager API
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/ovpn-manager --config /etc/ovpn-manager/config.json
-Restart=on-failure
-RestartSec=5
-User=root
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-}
-
-create_default_config() {
-  cat > "$CONFIG_FILE" <<'JSON'
-{
-  "listen": { "host": "127.0.0.1", "port": 3000 },
-  "apiKey": "",
-  "dbPath": "/etc/ovpn-manager/ovpn-manager.db",
-  "vpn": {
-    "hostname": "vpn.example.com",
-    "port": 1194,
-    "protocol": "udp",
-    "devType": "tun",
-    "subnet": "10.8.0.0",
-    "subnetMask": "255.255.255.0",
-    "dns": ["1.1.1.1", "1.0.0.1"],
-    "cipher": "AES-256-GCM"
-  },
-  "paths": {
-    "easyrsaDir": "/etc/openvpn/easy-rsa",
-    "serverConfigPath": "/etc/openvpn/server.conf",
-    "statusFile": "/var/log/openvpn/status.log",
-    "logFile": "/var/log/openvpn/openvpn.log",
-    "managementSocket": "/var/run/openvpn/management.sock",
-    "clientConfigDir": "/etc/openvpn/ccd"
-  },
-  "logLevel": "info"
-}
-JSON
-}
-
-# --- Commands ---
-
-do_install() {
-  local version="$1"
-  local arch
-  arch=$(detect_arch)
-
-  [[ "$version" == "latest" ]] && version=$(get_latest_version)
-
-  info "Installing ovpn-manager $version..."
-
-  # Install system dependencies
-  info "Installing system dependencies..."
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
-  apt-get install -y openvpn easy-rsa iptables-persistent
-
-  # Download and install binary
-  local tmp
-  tmp=$(download_binary "$version" "$arch")
-  mv "$tmp" "$INSTALL_DIR/$BINARY_NAME"
-  ok "Binary installed to $INSTALL_DIR/$BINARY_NAME"
-
-  # Create config directory
-  mkdir -p "$CONFIG_DIR"
-
-  # Generate default config (only if not exists)
-  if [[ ! -f "$CONFIG_FILE" ]]; then
-    create_default_config
-    ok "Config created at $CONFIG_FILE"
-  else
-    warn "Config already exists at $CONFIG_FILE — preserving"
-  fi
-
-  # Install systemd service
-  install_service
-  ok "Systemd service installed"
-
-  # Enable and start
-  systemctl daemon-reload
-  systemctl enable --now ovpn-manager
-  ok "Service enabled and started"
-
-  echo ""
-  info "Installation complete!"
-  echo ""
-
-  # Show API key (the binary auto-generates one on first run if empty)
-  sleep 2
-  if command -v journalctl &>/dev/null; then
-    local api_key
-    api_key=$(journalctl -u ovpn-manager --no-pager -n 20 2>/dev/null | sed -n 's/.*Generated API key: //p' | tail -1 || true)
-    if [[ -n "$api_key" ]]; then
-      echo "  API Key: $api_key"
-    else
-      echo "  API Key: Check config at $CONFIG_FILE or logs with: journalctl -u ovpn-manager"
-    fi
-  fi
-  echo "  Status:  systemctl status ovpn-manager"
-  echo "  Logs:    journalctl -u ovpn-manager -f"
-  echo ""
-}
-
-do_upgrade() {
-  local version="$1"
-  local arch
-  arch=$(detect_arch)
-
-  [[ "$version" == "latest" ]] && version=$(get_latest_version)
-
-  [[ -f "$INSTALL_DIR/$BINARY_NAME" ]] || error "ovpn-manager is not installed. Run 'install.sh install' first."
-
-  info "Upgrading ovpn-manager to $version..."
-
-  # Download new binary
-  local tmp
-  tmp=$(download_binary "$version" "$arch")
-
-  # Back up current binary for rollback
-  local backup="$INSTALL_DIR/$BINARY_NAME.bak"
-  cp "$INSTALL_DIR/$BINARY_NAME" "$backup"
-
-  # Replace binary and restart
-  mv "$tmp" "$INSTALL_DIR/$BINARY_NAME"
-  ok "Binary updated"
-
-  if systemctl restart ovpn-manager; then
-    rm -f "$backup"
-    ok "Service restarted"
-  else
-    warn "Service failed to start — rolling back..."
-    mv "$backup" "$INSTALL_DIR/$BINARY_NAME"
-    systemctl restart ovpn-manager 2>/dev/null || true
-    error "Upgrade failed. Previous version restored."
-  fi
-
-  echo ""
-  info "Upgrade to $version complete!"
-  echo ""
-}
-
-do_uninstall() {
-  info "Uninstalling ovpn-manager..."
-
-  # Stop and disable service
-  if systemctl is-active --quiet ovpn-manager 2>/dev/null; then
-    systemctl stop ovpn-manager
-    ok "Service stopped"
-  fi
-  if systemctl is-enabled --quiet ovpn-manager 2>/dev/null; then
-    systemctl disable ovpn-manager
-    ok "Service disabled"
-  fi
-
-  # Remove binary
-  rm -f "$INSTALL_DIR/$BINARY_NAME"
-  ok "Binary removed"
-
-  # Remove service file
-  rm -f "$SERVICE_FILE"
-  systemctl daemon-reload
-  ok "Service file removed"
-
-  # Ask about config/data
-  echo ""
-  local confirm=""
-  if [[ -t 0 ]]; then
-    read -rp "Remove config and data at $CONFIG_DIR? [y/N] " confirm
-  else
-    # stdin not a terminal (piped execution) — try /dev/tty
-    read -rp "Remove config and data at $CONFIG_DIR? [y/N] " confirm </dev/tty 2>/dev/null || true
-  fi
-  if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    rm -rf "$CONFIG_DIR"
-    ok "Config and data removed"
-  else
-    warn "Config and data preserved at $CONFIG_DIR"
-  fi
-
-  echo ""
-  info "Uninstall complete!"
-  echo ""
-}
-
 # --- Main ---
 
 main() {
-  # Auto-elevate to root (before arg parsing so $@ is preserved)
+  # Auto-elevate to root
   if [[ $EUID -ne 0 ]]; then
     info "Root required — re-running with sudo..."
     local self
@@ -280,7 +35,6 @@ main() {
     if [[ -f "$0" ]]; then
       cp "$0" "$self"
     else
-      # Piped execution — re-download for sudo re-exec
       curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$self"
     fi
     chmod +x "$self"
@@ -293,25 +47,63 @@ main() {
     shift 2
   fi
 
-  local command="install"
   local version="latest"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|upgrade|uninstall) command="$1"; shift ;;
       --version) version="${2:-}"; [[ -n "$version" ]] || error "--version requires a value"; shift 2 ;;
       --help|-h) usage ;;
-      *) error "Unknown option: $1. Use --help for usage." ;;
+      *) shift ;;
     esac
   done
 
-  check_linux
+  [[ "$(uname -s)" == "Linux" ]] || error "This script only supports Linux"
 
-  case "$command" in
-    install)   do_install "$version" ;;
-    upgrade)   do_upgrade "$version" ;;
-    uninstall) do_uninstall ;;
+  # Detect architecture
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64)  arch="x64" ;;
+    aarch64) arch="arm64" ;;
+    *)       error "Unsupported architecture: $arch" ;;
   esac
+
+  # Resolve version
+  if [[ "$version" == "latest" ]]; then
+    info "Checking latest version..."
+    local tag
+    tag=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "https://github.com/$REPO/releases/latest")
+    tag="${tag##*/}"
+    if [[ -z "$tag" || "$tag" == "releases" ]]; then
+      tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
+    fi
+    [[ -n "$tag" ]] || error "Could not determine latest version"
+    version="$tag"
+  fi
+
+  # Download binary
+  local url="https://github.com/$REPO/releases/download/$version/ovpn-manager-linux-$arch"
+  local tmp
+  tmp=$(mktemp)
+
+  info "Downloading ovpn-manager $version (linux-$arch)..."
+  if ! curl -fsSL -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    error "Download failed. Check that version $version exists for linux-$arch"
+  fi
+  chmod 755 "$tmp"
+  mv "$tmp" "$INSTALL_DIR/$BINARY_NAME"
+
+  ok "Binary installed to $INSTALL_DIR/$BINARY_NAME"
+  echo ""
+  info "Next steps:"
+  echo "  sudo ovpn-manager setup     # First-time setup (installs deps, creates config, starts service)"
+  echo "  sudo ovpn-manager tui       # Interactive management"
+  echo "  sudo ovpn-manager serve     # Start API server"
+  echo ""
+  echo "  sudo ovpn-manager upgrade   # Self-update to latest version"
+  echo "  sudo ovpn-manager uninstall # Remove everything"
+  echo ""
 }
 
 # Ensure entire script is downloaded before executing (for curl | bash)

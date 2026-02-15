@@ -22,10 +22,16 @@ const DEFAULT_CONFIG: AppConfig = {
     managementSocket: "/var/run/openvpn/management.sock",
     clientConfigDir: "/etc/openvpn/ccd",
   },
+  basePaths: {
+    serverDir: "/etc/openvpn/server",
+    logDir: "/var/log/openvpn",
+  },
   logLevel: "info",
 };
 
-function resolveConfigPath(): string {
+export function resolveConfigPath(override?: string): string {
+  if (override) return override;
+
   const args = process.argv;
   const configIdx = args.indexOf("--config");
   if (configIdx !== -1 && args[configIdx + 1] !== undefined) {
@@ -56,8 +62,13 @@ function deepMerge(target: Record<string, any>, source: Record<string, any>): Re
   return result;
 }
 
-export async function loadConfig(): Promise<AppConfig> {
-  const configPath = resolveConfigPath();
+export async function configExists(overridePath?: string): Promise<boolean> {
+  const configPath = resolveConfigPath(overridePath);
+  return await Bun.file(configPath).exists();
+}
+
+export async function loadConfig(overridePath?: string): Promise<AppConfig> {
+  const configPath = resolveConfigPath(overridePath);
   let fileConfig: Partial<AppConfig> = {};
 
   const file = Bun.file(configPath);
