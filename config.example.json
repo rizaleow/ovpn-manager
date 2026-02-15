@@ -1,0 +1,24 @@
+{
+  "listen": { "host": "127.0.0.1", "port": 3000 },
+  "apiKey": "",
+  "dbPath": "/etc/ovpn-manager/ovpn-manager.db",
+  "vpn": {
+    "hostname": "vpn.example.com",
+    "port": 1194,
+    "protocol": "udp",
+    "devType": "tun",
+    "subnet": "10.8.0.0",
+    "subnetMask": "255.255.255.0",
+    "dns": ["1.1.1.1", "1.0.0.1"],
+    "cipher": "AES-256-GCM"
+  },
+  "paths": {
+    "easyrsaDir": "/etc/openvpn/easy-rsa",
+    "serverConfigPath": "/etc/openvpn/server.conf",
+    "statusFile": "/var/log/openvpn/status.log",
+    "logFile": "/var/log/openvpn/openvpn.log",
+    "managementSocket": "/var/run/openvpn/management.sock",
+    "clientConfigDir": "/etc/openvpn/ccd"
+  },
+  "logLevel": "info"
+}

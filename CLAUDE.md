@@ -1,3 +1,4 @@
+# OpenVPN Manager
 
 Default to using Bun instead of Node.js.
 
@@ -23,84 +24,44 @@ Default to using Bun instead of Node.js.
 
 Use `bun test` to run tests.
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
+Tests live in `tests/`. Use in-memory SQLite + `setDb()` from `src/db/index.ts` to inject a test DB.
+Hono's `app.request()` is used for HTTP-level testing without starting a real server.
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+## Commands
+
+```bash
+bun run dev          # Start dev server with hot reload
+bun run build        # Compile to single binary (native)
+bun run build:linux  # Cross-compile for Linux x64
+bun test             # Run tests
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+Backend-only REST API. No frontend.
 
-Server:
+- **Framework:** Hono + @hono/zod-validator + Zod
+- **Database:** bun:sqlite (WAL mode, singleton via `src/db/index.ts`)
+- **Shell commands:** `src/utils/shell.ts` wraps `Bun.$` / `Bun.spawn`
 
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+```
+src/
+  index.ts          # Entrypoint — config, DB init, Hono app, Bun.serve
+  config.ts         # JSON config loader (CLI flag → env → default path)
+  db/               # SQLite schema + singleton
+  middleware/       # Auth (X-API-Key), error handler, audit logger
+  routes/           # Hono route groups (setup, server, clients, network, status)
+  services/         # Business logic (pki, openvpn, network, profile, status-monitor)
+  schemas/          # Zod validation schemas
+  types/            # Shared TypeScript types
+  utils/            # Shell command wrapper
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Gotchas
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- Must run as root on Linux (needs systemctl, iptables, sysctl access)
+- Config path: `--config <path>` flag → `OVPN_MANAGER_CONFIG` env → `/etc/ovpn-manager/config.json`
+- API key auto-generates on first run if empty in config
+- All `/api/*` routes require `X-API-Key` header; `/health` is unauthenticated
+- EasyRSA is called with `--batch` flag (non-interactive)
+- Server config changes via PUT `/api/server/config` auto-rewrite `server.conf` and restart OpenVPN

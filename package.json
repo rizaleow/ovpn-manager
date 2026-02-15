@@ -1,8 +1,19 @@
 {
   "name": "ovpn-manager",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile dist/ovpn-manager",
+    "build:linux": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile dist/ovpn-manager",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "hono": "^4.11.9",
+    "zod": "^4.3.6"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
