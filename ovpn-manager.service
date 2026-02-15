@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenVPN Manager API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ovpn-manager --config /etc/ovpn-manager/config.json
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
